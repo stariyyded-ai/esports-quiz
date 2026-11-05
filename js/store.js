@@ -174,11 +174,15 @@ function mqttHost(code) {
       changed();
     } else if (ps.length === 3 && ps[0] === "answers") {
       const q = Number(ps[1]), pid = ps[2];
-      const c = o.value?.c;
+      const v = o.value || {};
       if (r.state?.phase !== "question" || r.state.q !== q) return;
       if (!r.players?.[pid] || r.answers?.[q]?.[pid]) return;
-      if (!Number.isInteger(c) || c < 0 || c > 3) return;
-      setAt(r, `answers/${q}/${pid}`, { c, t: Date.now() });
+      let ans;
+      if (Number.isInteger(v.c) && v.c >= 0 && v.c <= 3) ans = { c: v.c };
+      else if (Number.isFinite(v.x) && Number.isFinite(v.y) && v.x >= 0 && v.x <= 1 && v.y >= 0 && v.y <= 1)
+        ans = { x: Math.round(v.x * 10000) / 10000, y: Math.round(v.y * 10000) / 10000 }; // касание картинки
+      else return;
+      setAt(r, `answers/${q}/${pid}`, { ...ans, t: Date.now() });
       changed();
     }
   }

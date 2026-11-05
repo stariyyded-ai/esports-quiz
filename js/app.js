@@ -2,6 +2,7 @@ import { QUESTIONS } from "./questions.js";
 import { SETTINGS } from "./config.js";
 import { createStore } from "./store.js";
 import { nextStats, computeAchievements } from "./achievements.js";
+import { isTap, validAnswer, isCorrect, tapBoard } from "./tap.js";
 
 const app = document.getElementById("app");
 const params = new URLSearchParams(location.search);
@@ -156,11 +157,12 @@ function runHost(code) {
       const upd = {};
       for (const p of players()) {
         const a = ans[p.id];
-        const valid = a && Number.isInteger(a.c) && a.c >= 0 && a.c < 4;
-        if (valid) counts[a.c]++;
+        const valid = validAnswer(q, a);
+        const right = valid && isCorrect(q, a);
+        if (valid) { if (isTap(q)) counts[right ? 0 : 1]++; else counts[a.c]++; }
         let gain = 0, streak = p.streak || 0, correct = false;
         const elapsedMs = valid ? Math.max(0, (a.t || 0) - (s.startedAt || 0)) : 0;
-        if (valid && a.c === q.a) {
+        if (right) {
           correct = true;
           const elapsed = elapsedMs / 1000;
           const frac = Math.min(1, elapsed / (s.duration || SETTINGS.questionTime));
@@ -172,7 +174,7 @@ function runHost(code) {
         }
         upd[`players/${p.id}/score`] = (p.score || 0) + gain;
         upd[`players/${p.id}/streak`] = streak;
-        upd[`players/${p.id}/last`] = { q: s.q, gain, correct, answer: valid ? a.c : -1 };
+        upd[`players/${p.id}/last`] = { q: s.q, gain, correct, answered: !!valid, answer: valid && !isTap(q) ? a.c : -1 };
         upd[`players/${p.id}/stats`] = nextStats(p.stats, q, {
           answered: valid, correct, elapsedMs, durationMs: (s.duration || SETTINGS.questionTime) * 1000, streak
         });
@@ -301,7 +303,8 @@ function runHost(code) {
     const totalAns = counts.reduce((a, b) => a + b, 0);
     const n = players().length;
     const top = ranked();
-    const rows = q.opts.map((o, i) => {
+    const tap = isTap(q);
+    const rows = tap ? "" : q.opts.map((o, i) => {
       const pct = totalAns ? Math.round((counts[i] / totalAns) * 100) : 0;
       return `<div class="orow c${i}${isReveal && i === q.a ? " right" : ""}">
           <span class="ol">${SHAPES[i]}${LETTERS[i]}</span>
@@ -320,9 +323,9 @@ function runHost(code) {
               ${isReveal ? "" : `<div class="qtimer" id="timer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg><span>0:${String(s.duration).padStart(2, "0")}</span></div>`}
             </div>
             ${isReveal ? "" : `<div class="tbar"><div id="tfill"></div></div>`}
-            <div class="qslab${q.image ? " with-img" : ""}"><h1>${esc(q.q)}</h1>${q.image ? `<img src="${esc(q.image)}" alt="Иллюстрация к вопросу">` : ""}</div>
-            <div class="opts">${rows}</div>
-            ${isReveal && q.fact ? `<div class="fact"><b>Факт</b><span>${esc(q.fact)}</span></div>` : ""}
+            <div class="qslab${q.image && !tap ? " with-img" : ""}"><h1>${esc(q.q)}</h1>${q.image && !tap ? `<img src="${esc(q.image)}" alt="Иллюстрация к вопросу">` : ""}</div>
+            ${tap ? hostTap(q, s, isReveal, counts, totalAns) : `<div class="opts">${rows}</div>`}
+            ${isReveal && q.fact ? `<div class="fact"><b>${tap ? "Ответ" : "Факт"}</b><span>${tap ? `${esc(q.answer)}. ` : ""}${esc(q.fact)}</span></div>` : ""}
           </section>
           <aside class="board" aria-label="Таблица лидеров">
             <h2>ТАБЛИЦА ЛИДЕРОВ</h2>
@@ -338,6 +341,17 @@ function runHost(code) {
             : `<button class="btn primary" data-act="reveal">Показать ответ</button>`}
         </footer>
       </div>`;
+  }
+
+  // Вопрос с тепловой картой на большом экране: во время вопроса — только счётчик касаний,
+  // на ответе — все касания пятнами и правильная зона.
+  function hostTap(q, s, isReveal, counts, totalAns) {
+    if (!isReveal) {
+      return `<div class="tapstage">${tapBoard(q)}<div class="tapcount"><span class="tc-label">Касаний</span><b id="taps">${answeredCount()}</b><span>Тепловая карта откроется после ответа</span></div></div>`;
+    }
+    const taps = Object.values(answersFor(s.q)).filter((a) => validAnswer(q, a)).map((a) => ({ x: a.x, y: a.y, hit: isCorrect(q, a) }));
+    const hitPct = totalAns ? Math.round((counts[0] / totalAns) * 100) : 0;
+    return `<div class="tapstage">${tapBoard(q, { taps, reveal: true })}<div class="tapcount reveal"><span class="tc-label">В точку</span><b>${hitPct}%</b><span>${counts[0]} из ${totalAns} попали в зону</span></div></div>`;
   }
 
   function renderFinal() {
@@ -385,19 +399,36 @@ function runPlayer(code) {
   }
   let room = null, loaded = false, lastKey = "";
   const localPick = {};
+  let tapPin = null;
+
+  // Касание картинки ставит метку; ответ отправляется кнопкой «Ответить».
+  app.addEventListener("pointerdown", (e) => {
+    const box = e.target.closest("#tapzone");
+    if (!box) return;
+    e.preventDefault();
+    const r = box.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    tapPin = { x: Math.round(x * 10000) / 10000, y: Math.round(y * 10000) / 10000 };
+    const pinEl = document.getElementById("tapzone-pin");
+    if (pinEl) { pinEl.style.display = ""; pinEl.style.left = `${x * 100}%`; pinEl.style.top = `${y * 100}%`; }
+    const ok = document.getElementById("tapok");
+    if (ok) { ok.disabled = false; ok.textContent = "Ответить"; }
+  });
 
   store.on(path, (v) => { room = v; loaded = true; render(); });
   setInterval(tick, 250);
 
   app.addEventListener("click", (e) => {
     const b = e.target.closest("[data-pick]");
-    if (b) pick(Number(b.dataset.pick));
+    if (b) pick({ c: Number(b.dataset.pick) });
+    if (e.target.closest("#tapok") && tapPin) pick({ x: tapPin.x, y: tapPin.y });
     if (e.target.closest("[data-home]")) location.href = link();
   });
 
   const me = () => room?.players?.[pid];
   const st = () => room?.state || { phase: "lobby", q: -1 };
-  const myAnswer = (q) => room?.answers?.[q]?.[pid]?.c ?? localPick[q];
+  const myAnswer = (q) => room?.answers?.[q]?.[pid] ?? localPick[q];
   const ranked = () => Object.entries(room?.players || {}).map(([id, p]) => ({ id, ...p }))
     .sort((a, b) => (b.score || 0) - (a.score || 0) || (a.joinedAt || 0) - (b.joinedAt || 0));
   const place = () => ranked().findIndex((p) => p.id === pid) + 1;
@@ -487,6 +518,19 @@ function runPlayer(code) {
   function renderQuestion() {
     const s = st(); const q = QUESTIONS[s.q];
     if (!q) return;
+    if (isTap(q)) {
+      tapPin = null;
+      app.innerHTML = `<div class="player">${header(`<span class="pt" id="pt">${s.duration}</span>`)}
+        <div class="pq"><span class="pcat">${esc(q.cat)}</span><h2>${esc(q.q)}</h2></div>
+        <div class="ptap">
+          ${tapBoard(q, { id: "tapzone", interactive: true })}
+          <p class="taphint">Коснись картинки, чтобы поставить метку. Можно передвинуть.</p>
+          <button type="button" class="btn primary tapok" id="tapok" disabled>Поставь метку</button>
+        </div>
+      </div>`;
+      tick();
+      return;
+    }
     app.innerHTML = `<div class="player">${header(`<span class="pt" id="pt">${s.duration}</span>`)}
       <div class="pq"><span class="pcat">${esc(q.cat)}</span><h2>${esc(q.q)}</h2>${qImage(q)}</div>
       <div class="popts">${q.opts.map((o, i) => `<button type="button" class="opt c${i}" data-pick="${i}"><span class="ol">${SHAPES[i]}${LETTERS[i]}</span><span>${esc(o)}</span></button>`).join("")}</div>
@@ -494,20 +538,22 @@ function runPlayer(code) {
     tick();
   }
 
-  async function pick(i) {
+  async function pick(ans) {
     const s = st();
     if (s.phase !== "question" || myAnswer(s.q) !== undefined) return;
-    localPick[s.q] = i;
+    localPick[s.q] = ans;
     render();
-    await store.set(`${path}/answers/${s.q}/${pid}`, { c: i, t: store.serverTs() });
+    await store.set(`${path}/answers/${s.q}/${pid}`, { ...ans, t: store.serverTs() });
   }
 
   function renderAnswered() {
-    const s = st(); const q = QUESTIONS[s.q]; const c = myAnswer(s.q);
+    const s = st(); const q = QUESTIONS[s.q]; const my = myAnswer(s.q); const c = my?.c;
     app.innerHTML = `<div class="player">${header(`<span class="pt" id="pt"></span>`)}
       <div class="pwait">
         <h1>Ответ принят!</h1>
-        <span class="chosen opt c${c}">${SHAPES[c]}${LETTERS[c]} · ${esc(q.opts[c])}</span>
+        ${isTap(q)
+          ? `<div class="ptap small">${tapBoard(q, { pin: my })}</div>`
+          : `<span class="chosen opt c${c}">${SHAPES[c]}${LETTERS[c]} · ${esc(q.opts[c])}</span>`}
         <p>Ждём остальных и смотрим на экран.</p>
       </div></div>`;
     tick();
@@ -516,14 +562,17 @@ function runPlayer(code) {
   function renderReveal() {
     const s = st(); const q = QUESTIONS[s.q]; const m = me();
     const last = m.last && m.last.q === s.q ? m.last : null;
-    const answered = last ? last.answer >= 0 : myAnswer(s.q) !== undefined;
+    const answered = last ? !!last.answered : myAnswer(s.q) !== undefined;
+    const my = myAnswer(s.q);
     const ok = last?.correct;
     const cls = ok ? "ok" : answered ? "bad" : "none";
     const title = ok ? "Верно!" : answered ? "Мимо!" : "Время вышло";
     app.innerHTML = `<div class="player">${header()}
       <div class="result ${cls}"><h1>${title}</h1>${ok ? `<span class="gain">+${fmtNum(last.gain)}</span>` : ""}${ok && m.streak > 1 ? `<span>Серия: ${m.streak} подряд</span>` : ""}</div>
       <div class="pinfo">
-        <div class="row"><b>Правильный ответ</b>${LETTERS[q.a]} · ${esc(q.opts[q.a])}</div>
+        ${isTap(q)
+          ? `<div class="ptap small">${tapBoard(q, { reveal: true, pin: my ? { ...my, cls: ok ? "hit" : "miss" } : null })}</div><div class="row"><b>Правильный ответ</b>${esc(q.answer)}</div>`
+          : `<div class="row"><b>Правильный ответ</b>${LETTERS[q.a]} · ${esc(q.opts[q.a])}</div>`}
         ${q.fact ? `<div class="row"><b>Факт</b>${esc(q.fact)}</div>` : ""}
         <div class="row"><b>Твоё место</b>${place()} из ${ranked().length} · ${fmtNum(m.score)} очков</div>
       </div></div>`;
