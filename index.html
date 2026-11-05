@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Киберквиз</title>
+<meta name="theme-color" content="#15122B">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Roboto+Condensed:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+<script src="js/mqtt.min.js"></script>
+</head>
+<body>
+<div id="net" class="net" hidden>Нет связи с сервером. Переподключаемся…</div>
+<main id="app"><div class="loading">Подключаемся к игре…</div></main>
+<div id="testmode" class="testmode" hidden>Тестовый режим (?local=1): игра работает только во вкладках этого браузера.</div>
+<noscript>Для квиза нужен включённый JavaScript.</noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
