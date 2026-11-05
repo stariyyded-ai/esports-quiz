@@ -1,6 +1,7 @@
 import { QUESTIONS } from "./questions.js";
 import { SETTINGS } from "./config.js";
 import { createStore } from "./store.js";
+import { nextStats, computeAchievements } from "./achievements.js";
 
 const app = document.getElementById("app");
 const params = new URLSearchParams(location.search);
@@ -105,7 +106,7 @@ function runHost(code) {
     const b = e.target.closest("[data-act]");
     if (!b) return;
     const act = b.dataset.act;
-    if (act === "start") goTo(0);
+    if (act === "start") startCountdown();
     else if (act === "reveal") reveal();
     else if (act === "next") next();
     else if (act === "end") { if (confirm("Завершить игру и показать итоги?")) finish(); }
@@ -124,9 +125,18 @@ function runHost(code) {
 
   function primary() {
     const s = st();
-    if (s.phase === "lobby" && players().length) goTo(0);
+    if (s.phase === "lobby" && players().length) startCountdown();
     else if (s.phase === "question") reveal();
     else if (s.phase === "reveal") next();
+  }
+
+  // Кнопка «Старт» — 5-секундный отсчёт на экране и на всех телефонах, потом первый вопрос.
+  let countdownDone = null;
+  async function startCountdown() {
+    if (busy || st().phase !== "lobby") return; busy = true;
+    try {
+      await store.update(path, { state: { phase: "countdown", q: -1, startedAt: store.serverTs(), duration: SETTINGS.countdown } });
+    } finally { busy = false; }
   }
 
   async function goTo(i) {
@@ -149,9 +159,10 @@ function runHost(code) {
         const valid = a && Number.isInteger(a.c) && a.c >= 0 && a.c < 4;
         if (valid) counts[a.c]++;
         let gain = 0, streak = p.streak || 0, correct = false;
+        const elapsedMs = valid ? Math.max(0, (a.t || 0) - (s.startedAt || 0)) : 0;
         if (valid && a.c === q.a) {
           correct = true;
-          const elapsed = Math.max(0, ((a.t || 0) - (s.startedAt || 0)) / 1000);
+          const elapsed = elapsedMs / 1000;
           const frac = Math.min(1, elapsed / (s.duration || SETTINGS.questionTime));
           gain = Math.round(SETTINGS.maxPoints - (SETTINGS.maxPoints - SETTINGS.minPoints) * frac);
           streak += 1;
@@ -162,6 +173,9 @@ function runHost(code) {
         upd[`players/${p.id}/score`] = (p.score || 0) + gain;
         upd[`players/${p.id}/streak`] = streak;
         upd[`players/${p.id}/last`] = { q: s.q, gain, correct, answer: valid ? a.c : -1 };
+        upd[`players/${p.id}/stats`] = nextStats(p.stats, q, {
+          answered: valid, correct, elapsedMs, durationMs: (s.duration || SETTINGS.questionTime) * 1000, streak
+        });
       }
       upd["state/phase"] = "reveal";
       upd["state/counts"] = counts;
@@ -174,11 +188,18 @@ function runHost(code) {
     if (s.phase !== "reveal") return;
     if (s.q + 1 >= TOTAL) finish(); else goTo(s.q + 1);
   }
-  const finish = () => store.update(path, { "state/phase": "final" });
+  const finish = () => store.update(path, { "state/phase": "final", achievements: computeAchievements(ranked()) });
   const kick = (id) => store.update(path, { [`players/${id}`]: null, [`kicked/${id}`]: true });
 
   function tick() {
     const s = st();
+    if (s.phase === "countdown" && typeof s.startedAt === "number") {
+      const left = s.startedAt + s.duration * 1000 - store.now();
+      const el = document.getElementById("cd");
+      if (el) el.textContent = Math.max(1, Math.ceil(left / 1000));
+      if (left <= 0 && countdownDone !== s.startedAt) { countdownDone = s.startedAt; goTo(0); }
+      return;
+    }
     if (s.phase !== "question" || typeof s.startedAt !== "number") return;
     const left = s.startedAt + s.duration * 1000 - store.now();
     const sec = Math.max(0, Math.ceil(left / 1000));
@@ -199,6 +220,7 @@ function runHost(code) {
     if (!room) { app.innerHTML = `<div class="center-msg"><h1>Комната ${esc(code)} не найдена</h1><p>Создайте новую игру.</p><button class="btn primary" data-act="new">На главную</button></div>`; return; }
     const s = st();
     if (s.phase === "lobby") renderLobby();
+    else if (s.phase === "countdown") renderCountdown();
     else if (s.phase === "final") renderFinal();
     else renderQuestion(s);
     tick();
@@ -226,7 +248,7 @@ function runHost(code) {
         </section>
         <footer class="hostbar">
           <span class="grow">${TOTAL} вопросов · очки за скорость и серии правильных ответов</span>
-          <button class="btn primary" data-act="start" ${ps.length ? "" : "disabled"}>Начать игру</button>
+          <button class="btn primary" data-act="start" ${ps.length ? "" : "disabled"}>Старт</button>
         </footer>
       </div>`;
     const qrBox = document.getElementById("qr");
@@ -236,6 +258,19 @@ function runHost(code) {
     }
     if (qrNode) qrBox.appendChild(qrNode);
     else if (!window.QRCode) setTimeout(() => { if (st().phase === "lobby" && window.QRCode && !qrNode) render(); }, 800);
+  }
+
+  function renderCountdown() {
+    const n = players().length;
+    app.innerHTML = `
+      <div class="host">
+        ${topbar(`Игроков: <b>${n}</b>`)}
+        <section class="countdown">
+          <div class="cd-label">Приготовьтесь!</div>
+          <div class="cd-num" id="cd" aria-live="polite">${SETTINGS.countdown}</div>
+          <div class="cd-sub">${TOTAL} вопросов · первый — «${esc(QUESTIONS[0].cat)}»</div>
+        </section>
+      </div>`;
   }
 
   function renderQuestion(s) {
@@ -287,16 +322,30 @@ function runHost(code) {
 
   function renderFinal() {
     const top = ranked();
+    const ach = room.achievements || {};
+    const badge = (p) => ach[p.id] ? `<span class="ach-badge"><span class="ach-e" aria-hidden="true">${esc(ach[p.id].e)}</span>${esc(ach[p.id].t)}</span>` : "";
     const pod = (p, place) => p
-      ? `<div class="pod p${place}"><span class="pname">${esc(p.name)}</span><span class="pscore">${fmtNum(p.score)} очков</span><div class="block">${place}</div></div>`
+      ? `<div class="pod p${place}"><span class="pname">${esc(p.name)}</span>${badge(p)}<span class="pscore">${fmtNum(p.score)} очков</span><div class="block">${place}</div></div>`
       : `<div class="pod p${place}"></div>`;
+    const card = (p, i) => {
+      const a = ach[p.id];
+      return `<div class="ach-card">
+          <span class="ach-big" aria-hidden="true">${esc(a?.e || "🎮")}</span>
+          <div class="ach-body">
+            <div class="ach-who"><b>${i + 1}. ${esc(p.name)}</b><span>${fmtNum(p.score)}</span></div>
+            <div class="ach-title">${esc(a?.t || "Участник")}</div>
+            <div class="ach-desc">${esc(a?.d || "")}</div>
+          </div>
+        </div>`;
+    };
     app.innerHTML = `
       <div class="host">
         ${topbar(`Игроков: <b>${top.length}</b>`)}
         <section class="final-main">
           <h1>Итоги квиза</h1>
           <div class="podium">${pod(top[1], 2)}${pod(top[0], 1)}${pod(top[2], 3)}</div>
-          <div class="rest">${top.slice(3, 12).map((p, i) => `<div class="brow"><span class="bn">${i + 4}</span><span class="bname">${esc(p.name)}</span><span class="bs">${fmtNum(p.score)}</span></div>`).join("")}</div>
+          <h2 class="ach-head">Достижения</h2>
+          <div class="ach-grid">${top.map(card).join("")}</div>
         </section>
         <footer class="hostbar"><span class="grow">Спасибо за игру!</span><button class="btn primary" data-act="new">Новая игра</button></footer>
       </div>`;
@@ -340,9 +389,10 @@ function runPlayer(code) {
     if (!me()) return "join";
     const s = st();
     if (s.phase === "lobby") return `lobby:${Object.keys(room.players || {}).length}`;
+    if (s.phase === "countdown") return `countdown:${s.startedAt}`;
     if (s.phase === "question") return myAnswer(s.q) !== undefined ? `answered:${s.q}` : `q:${s.q}`;
     if (s.phase === "reveal") return `reveal:${s.q}:${me().score}:${place()}`;
-    return `final:${me().score}:${place()}`;
+    return `final:${me().score}:${place()}:${room.achievements?.[pid]?.t || ""}`;
   }
 
   function render() {
@@ -355,6 +405,7 @@ function runPlayer(code) {
     if (kind === "kicked") return msg("Ты вне игры", "Ведущий убрал тебя из этой комнаты.", true);
     if (kind === "join") return renderJoin();
     if (kind === "lobby") return renderLobby();
+    if (kind === "countdown") return renderCountdown();
     if (kind === "q") return renderQuestion();
     if (kind === "answered") return renderAnswered();
     if (kind === "reveal") return renderReveal();
@@ -399,6 +450,16 @@ function runPlayer(code) {
       <div class="pwait"><div class="spinner" aria-hidden="true"></div>
         <h1>Ты в игре, ${esc(me().name)}!</h1>
         <p>Смотри на экран ведущего — скоро начнём.<br>Уже в комнате: <b>${n}</b></p></div></div>`;
+  }
+
+  function renderCountdown() {
+    app.innerHTML = `<div class="player">${header()}
+      <div class="pwait countdown">
+        <div class="cd-label">Приготовься, ${esc(me().name)}!</div>
+        <div class="cd-num" id="cd" aria-live="polite">${SETTINGS.countdown}</div>
+        <p>Сейчас будет первый вопрос</p>
+      </div></div>`;
+    tick();
   }
 
   function qImage(q) { return q.image ? `<img src="${esc(q.image)}" alt="Иллюстрация к вопросу">` : ""; }
@@ -449,18 +510,24 @@ function runPlayer(code) {
   }
 
   function renderFinal() {
-    const p = place(); const n = ranked().length;
+    const p = place(); const n = ranked().length; const a = room.achievements?.[pid];
     app.innerHTML = `<div class="player">${header()}
       <div class="pwait">
         <h1>Игра окончена!</h1>
         <div class="big">${p} место</div>
         <p>из ${n} игроков · ${fmtNum(me().score)} очков</p>
+        ${a ? `<div class="my-ach"><span class="ach-big" aria-hidden="true">${esc(a.e)}</span><span class="my-ach-label">Твоё достижение</span><span class="ach-title">${esc(a.t)}</span><span class="ach-desc">${esc(a.d)}</span></div>` : ""}
         <p>${p === 1 ? "Ты чемпион квиза!" : p <= 3 ? "Ты на пьедестале — отличный результат!" : "Классная игра! Приходи на следующий квиз."}</p>
       </div></div>`;
   }
 
   function tick() {
     const s = st();
+    const cd = document.getElementById("cd");
+    if (cd && s.phase === "countdown" && typeof s.startedAt === "number") {
+      cd.textContent = Math.max(1, Math.ceil((s.startedAt + s.duration * 1000 - store.now()) / 1000));
+      return;
+    }
     const el = document.getElementById("pt");
     if (!el || s.phase !== "question" || typeof s.startedAt !== "number") return;
     const sec = Math.max(0, Math.ceil((s.startedAt + s.duration * 1000 - store.now()) / 1000));

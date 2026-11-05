@@ -132,10 +132,10 @@ body.test .host, body.test .player { min-height: calc(100vh - 34px); }
 .pod { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0; }
 .pod .pname { font-size: clamp(18px, 2.4vw, 30px); font-weight: 700; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pod .pscore { font-family: var(--display); color: var(--muted); font-size: 20px; }
-.pod .block { width: 100%; display: flex; align-items: flex-start; justify-content: center; padding-top: 14px; font-family: var(--display); font-weight: 700; font-size: clamp(40px, 6vw, 80px); color: var(--bg); }
+.pod .block { width: 100%; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-weight: 700; font-size: clamp(36px, 5vw, 64px); line-height: 1; color: var(--bg); }
 .pod.p1 .block { height: clamp(140px, 22vh, 240px); background: var(--accent); }
 .pod.p2 .block { height: clamp(100px, 16vh, 170px); background: #D9D4F5; }
-.pod.p3 .block { height: clamp(70px, 11vh, 120px); background: #E8A86A; }
+.pod.p3 .block { height: clamp(84px, 11vh, 120px); background: #E8A86A; }
 .rest { width: min(600px, 100%); display: flex; flex-direction: column; gap: 6px; }
 
 /* ── Телефон игрока ── */
@@ -193,3 +193,30 @@ body.test .host, body.test .player { min-height: calc(100vh - 34px); }
   .hostbar { padding-top: 10px; padding-bottom: 10px; }
   .btn { min-height: 46px; }
 }
+
+/* Достижения */
+.ach-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); padding: 4px 10px; font-size: 15px; font-weight: 700; max-width: 100%; }
+.ach-e { font-size: 18px; }
+.ach-head { margin: 8px 0 0; font-family: var(--display); font-weight: 600; letter-spacing: .12em; color: var(--muted); font-size: 20px; text-transform: uppercase; }
+.ach-grid { width: min(1200px, 100%); display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.ach-card { background: var(--panel); padding: 14px 16px; display: flex; gap: 14px; align-items: flex-start; min-width: 0; animation: pop .35s ease-out both; }
+.ach-big { font-size: 40px; line-height: 1; flex: none; }
+.ach-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.ach-who { display: flex; justify-content: space-between; gap: 8px; font-size: 16px; }
+.ach-who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ach-who span { font-family: var(--display); color: var(--muted); flex: none; }
+.ach-title { font-family: var(--display); font-weight: 700; font-size: 22px; color: var(--accent); text-transform: uppercase; line-height: 1.1; }
+.ach-desc { color: var(--muted); font-size: 15px; line-height: 1.35; }
+.my-ach { background: var(--panel); padding: 18px 20px; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; max-width: 360px; }
+.my-ach .ach-big { font-size: 56px; }
+.my-ach-label { font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: 13px; color: var(--muted); }
+.my-ach .ach-title { font-size: 28px; }
+
+/* Обратный отсчёт перед стартом */
+.countdown { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; }
+.cd-label { font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: clamp(28px, 4vw, 56px); letter-spacing: .04em; }
+.cd-num { font-family: var(--display); font-weight: 700; line-height: 1; color: var(--bg); background: var(--accent); min-width: 1.3em; padding: 0 .15em; text-align: center; font-size: clamp(140px, 24vw, 320px); animation: tickpop 1s ease-out infinite; }
+.cd-sub { color: var(--muted); font-size: clamp(18px, 2vw, 24px); }
+.player .countdown .cd-label { font-size: 28px; }
+.player .countdown .cd-num { font-size: 140px; }
+@keyframes tickpop { 0% { transform: scale(1.12); } 30% { transform: scale(1); } 100% { transform: scale(1); } }
