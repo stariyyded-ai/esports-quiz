@@ -228,33 +228,53 @@ function runHost(code) {
 
   function renderLobby() {
     const ps = players().sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+    const initials = (n) => esc(String(n).trim().slice(0, 1).toUpperCase());
+    const gamepad = `<svg viewBox="0 0 64 40" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"><path d="M14 4h36a12 12 0 0 1 12 12v6a14 14 0 0 1-25 8.7L35 28h-6l-2 2.7A14 14 0 0 1 2 22v-6A12 12 0 0 1 14 4Z"/><path d="M16 14v10M11 19h10" stroke-linecap="round"/><circle cx="44" cy="15" r="2.5" fill="currentColor"/><circle cx="50" cy="21" r="2.5" fill="currentColor"/></svg>`;
     app.innerHTML = `
-      <div class="host">
+      <div class="host fit">
         ${topbar(`Комната <b>${esc(code)}</b>`)}
-        <section class="lobby-main">
-          <div class="join-panel">
-            <div class="step">Заходи с телефона</div>
-            <div class="url">${esc(joinBase().replace(/^https?:\/\//, ""))}</div>
-            <div class="code-label">Код комнаты</div>
-            <div class="code">${esc(code)}</div>
-            <div class="qr" id="qr" aria-label="QR-код для входа в игру"></div>
+        <section class="lobby2">
+          <div class="join2">
+            <h1 class="join2-title">Подключайся!</h1>
+            <div class="qr-frame"><div class="qr" id="qr" role="img" aria-label="QR-код для входа в игру"></div></div>
+            <div class="join2-or"><span>или введи код</span></div>
+            <div class="digits" aria-label="Код комнаты ${esc(code)}">${[...String(code)].map((d) => `<span>${esc(d)}</span>`).join("")}</div>
+            <ol class="steps">
+              <li><b>1</b>Наведи камеру на QR-код</li>
+              <li><b>2</b>Напиши своё имя</li>
+              <li><b>3</b>Жди старта!</li>
+            </ol>
           </div>
-          <div class="players-panel">
-            <div class="pp-head">Игроки <b>${ps.length}</b></div>
+          <div class="roster">
+            <div class="roster-head">
+              <h2>Игроки в лобби</h2>
+              <span class="roster-count">${ps.length}</span>
+            </div>
             ${ps.length
-              ? `<div class="chips">${ps.map((p) => `<span class="chip">${esc(p.name)}<button type="button" data-act="kick" data-id="${esc(p.id)}" aria-label="Убрать игрока ${esc(p.name)}">×</button></span>`).join("")}</div>`
-              : `<div class="empty">Пока никого. Ждём первых игроков…</div>`}
+              ? `<div class="pgrid">${ps.map((p, i) => `
+                  <div class="chip pcard">
+                    <span class="ava a${i % 4}" aria-hidden="true">${initials(p.name)}</span>
+                    <span class="pname2">${esc(p.name)}</span>
+                    <button type="button" data-act="kick" data-id="${esc(p.id)}" aria-label="Убрать игрока ${esc(p.name)}">×</button>
+                  </div>`).join("")}</div>`
+              : `<div class="roster-empty">
+                  <div class="pad-icon">${gamepad}</div>
+                  <p>Ждём первых игроков</p>
+                  <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+                </div>`}
           </div>
         </section>
         <footer class="hostbar">
-          <span class="grow">${TOTAL} вопросов · очки за скорость и серии правильных ответов</span>
-          <button class="btn primary" data-act="start" ${ps.length ? "" : "disabled"}>Старт</button>
+          <span class="grow lobby-info"><b>${TOTAL}</b> вопросов <span class="sep">·</span> <b>${SETTINGS.questionTime}</b> сек на ответ <span class="sep">·</span> очки за скорость и серии</span>
+          <button class="btn primary btn-start" data-act="start" ${ps.length ? "" : "disabled"}>
+            <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3l12 7-12 7z" fill="currentColor"/></svg>Старт
+          </button>
         </footer>
       </div>`;
     const qrBox = document.getElementById("qr");
     if (!qrNode && window.QRCode) {
       qrNode = document.createElement("div");
-      new window.QRCode(qrNode, { text: joinUrl, width: 240, height: 240, colorDark: "#15122B", colorLight: "#FFFFFF" });
+      new window.QRCode(qrNode, { text: joinUrl, width: 320, height: 320, colorDark: "#15122B", colorLight: "#FFFFFF" });
     }
     if (qrNode) qrBox.appendChild(qrNode);
     else if (!window.QRCode) setTimeout(() => { if (st().phase === "lobby" && window.QRCode && !qrNode) render(); }, 800);
